@@ -56,6 +56,16 @@ static void cvi_do_pwroff(void)
 
 	writel(0xAB18, REG_RTC_CTRL_BASE + RTC_CTRL0_UNLOCKKEY);
 
+	/*
+	 * CRITICAL: Disable power cycle before shutdown!
+	 * The FSBL enables RTC_EN_PWR_CYC_REQ, which causes the system to
+	 * immediately power back on after poweroff (power cycle behavior).
+	 * We must disable it to allow proper shutdown with RTC alarm wake.
+	 */
+	writel(0x0, REG_RTC_BASE + RTC_EN_PWR_CYC_REQ);
+	while (readl(REG_RTC_BASE + RTC_EN_PWR_CYC_REQ) != 0x00)
+		;
+
 	writel(0x1, REG_RTC_BASE + RTC_EN_SHDN_REQ);
 
 	while (readl(REG_RTC_BASE + RTC_EN_SHDN_REQ) != 0x01)
