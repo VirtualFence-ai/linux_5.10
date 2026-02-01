@@ -46,10 +46,15 @@ static int cvi_restart_handler(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
+#define RTC_EN_PWR_VBAT_DET		0xD0
+
 static void cvi_do_pwroff(void)
 {
 	void __iomem *REG_RTC_CTRL_BASE = base;
 	void __iomem *REG_RTC_BASE = base + 0x1000;
+	u32 wakeup_mask;
+
+	pr_info("cvi_do_pwroff: Starting power off sequence\n");
 
 	/* Enable power suspend wakeup source mask */
 	writel(0x1, REG_RTC_BASE + 0x3C); // 1 = select prdata from 32K domain
@@ -62,15 +67,36 @@ static void cvi_do_pwroff(void)
 	 * immediately power back on after poweroff (power cycle behavior).
 	 * We must disable it to allow proper shutdown with RTC alarm wake.
 	 */
+	pr_info("cvi_do_pwroff: Disabling power cycle request\n");
 	writel(0x0, REG_RTC_BASE + RTC_EN_PWR_CYC_REQ);
 	while (readl(REG_RTC_BASE + RTC_EN_PWR_CYC_REQ) != 0x00)
 		;
+
+	/*
+	 * Disable VBAT detection power-on (per FSBL comment:
+	 * "Avoid power up again after poweroff")
+	 */
+	pr_info("cvi_do_pwroff: Clearing VBAT detection bits\n");
+	writel(0x0, REG_RTC_BASE + RTC_EN_PWR_VBAT_DET);
+
+	/*
+	 * Only keep RTC alarm as wake source.
+	 * Clear all other wake bits, keep only bit 5 (alarm from suspend)
+	 * and bit 13 (alarm power-on from off).
+	 */
+	wakeup_mask = readl(REG_RTC_BASE + RTC_EN_PWR_WAKEUP);
+	pr_info("cvi_do_pwroff: Current wake mask: 0x%08x\n", wakeup_mask);
+	/* Keep only bits 4, 5, 13 for RTC alarm wake */
+	wakeup_mask &= (0x30 | (1 << 13));
+	writel(wakeup_mask, REG_RTC_BASE + RTC_EN_PWR_WAKEUP);
+	pr_info("cvi_do_pwroff: New wake mask: 0x%08x\n", wakeup_mask);
 
 	writel(0x1, REG_RTC_BASE + RTC_EN_SHDN_REQ);
 
 	while (readl(REG_RTC_BASE + RTC_EN_SHDN_REQ) != 0x01)
 		;
 
+	pr_info("cvi_do_pwroff: Triggering shutdown via RTC_CTRL0\n");
 	writel(0xFFFF0800 | (0x1 << 0), REG_RTC_CTRL_BASE + RTC_CTRL0);
 
 	/* Wait some time until system down, otherwise, notice with a warn */
