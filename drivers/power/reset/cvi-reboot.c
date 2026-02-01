@@ -106,7 +106,16 @@ static void cvi_do_pwroff(void)
 	while (readl(REG_RTC_BASE + RTC_EN_SHDN_REQ) != 0x01)
 		;
 
+	/* Log final register states for debugging */
+	pr_info("cvi_do_pwroff: Final RTC_EN_PWR_WAKEUP: 0x%08x\n",
+		readl(REG_RTC_BASE + RTC_EN_PWR_WAKEUP));
+	pr_info("cvi_do_pwroff: Final RTC_EN_PWR_VBAT_DET: 0x%08x\n",
+		readl(REG_RTC_BASE + RTC_EN_PWR_VBAT_DET));
+	pr_info("cvi_do_pwroff: Final RTC_EN_PWR_CYC_REQ: 0x%08x\n",
+		readl(REG_RTC_BASE + RTC_EN_PWR_CYC_REQ));
+
 	pr_info("cvi_do_pwroff: Triggering shutdown via RTC_CTRL0\n");
+
 	writel(0xFFFF0800 | (0x1 << 0), REG_RTC_CTRL_BASE + RTC_CTRL0);
 
 	/* Wait some time until system down, otherwise, notice with a warn */
