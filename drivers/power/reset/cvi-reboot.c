@@ -52,7 +52,7 @@ static void cvi_do_pwroff(void)
 {
 	void __iomem *REG_RTC_CTRL_BASE = base;
 	void __iomem *REG_RTC_BASE = base + 0x1000;
-	u32 wakeup_mask;
+	u32 wakeup_mask, val;
 
 	pr_info("cvi_do_pwroff: Starting power off sequence\n");
 
@@ -62,22 +62,32 @@ static void cvi_do_pwroff(void)
 	writel(0xAB18, REG_RTC_CTRL_BASE + RTC_CTRL0_UNLOCKKEY);
 
 	/*
-	 * CRITICAL: Disable power cycle before shutdown!
-	 * The FSBL enables RTC_EN_PWR_CYC_REQ, which causes the system to
-	 * immediately power back on after poweroff (power cycle behavior).
-	 * We must disable it to allow proper shutdown with RTC alarm wake.
+	 * CRITICAL: Disable RTC_EN_AUTO_POWER_UP (bit 2 of RTC_EN_PWR_VBAT_DET)
+	 * Per SG2002 TRM section 6.4.3 point 7:
+	 * "After the RTC is powered on for the first time, the register
+	 * RTC_EN_AUTO_POWER_UP must be configured from the default value 1 to 0.
+	 * If the default value is maintained, when the chip enters the power-down
+	 * state, the RTC will automatically enter the power-on state when it
+	 * detects that PWR_VBAT_DET is high level."
+	 *
+	 * This is the ROOT CAUSE of immediate reboot after poweroff!
+	 */
+	val = readl(REG_RTC_BASE + RTC_EN_PWR_VBAT_DET);
+	pr_info("cvi_do_pwroff: RTC_EN_PWR_VBAT_DET before: 0x%08x\n", val);
+	writel(0x0, REG_RTC_BASE + RTC_EN_PWR_VBAT_DET);
+	val = readl(REG_RTC_BASE + RTC_EN_PWR_VBAT_DET);
+	pr_info("cvi_do_pwroff: RTC_EN_PWR_VBAT_DET after:  0x%08x\n", val);
+	if (val != 0x0)
+		pr_warn("cvi_do_pwroff: WARNING - RTC_EN_PWR_VBAT_DET not cleared!\n");
+
+	/*
+	 * Disable power cycle request.
+	 * The FSBL enables RTC_EN_PWR_CYC_REQ, which causes power cycle behavior.
 	 */
 	pr_info("cvi_do_pwroff: Disabling power cycle request\n");
 	writel(0x0, REG_RTC_BASE + RTC_EN_PWR_CYC_REQ);
 	while (readl(REG_RTC_BASE + RTC_EN_PWR_CYC_REQ) != 0x00)
 		;
-
-	/*
-	 * Disable VBAT detection power-on (per FSBL comment:
-	 * "Avoid power up again after poweroff")
-	 */
-	pr_info("cvi_do_pwroff: Clearing VBAT detection bits\n");
-	writel(0x0, REG_RTC_BASE + RTC_EN_PWR_VBAT_DET);
 
 	/*
 	 * Only keep RTC alarm as wake source.
